@@ -27,6 +27,14 @@ python scripts/seed_data.py
 ```
 Creates 12 synthetic patients across two clinics with mixed conflict scenarios.
 
+## Manual Smoke Evidence
+```bash
+python scripts/manual_smoke.py
+```
+Generates request/response evidence in docs/smoke_evidence.md.
+
+If local MongoDB is not available, the smoke script runs the same API endpoints with an in-memory repository override to keep the demo reproducible.
+
 ## Test
 ```bash
 pytest
@@ -87,7 +95,8 @@ Request flow:
 1. Uses static rule file, not a clinical drug ontology.
 2. No authentication/authorization.
 3. Conflict severity scoring is not implemented.
-4. Next steps:
+4. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
+5. Next steps:
 - Add user identity and audit trail per action.
 - Add richer normalization (brand/generic mapping).
 - Add pagination and cursor-based reporting APIs.
