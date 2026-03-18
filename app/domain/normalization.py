@@ -7,7 +7,7 @@ from typing import Any
 from app.domain.models import CanonicalMedication, IncomingMedication
 
 
-_DOSE_PATTERN = re.compile(r"^(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>[a-zA-Z]+)$")
+_DOSE_PATTERN = re.compile(r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>[a-zA-Z]+)")
 _NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
 _MG_CONVERSION_FACTORS = {
     "mg": 1.0,
@@ -77,7 +77,8 @@ def parse_dose_value_unit(item: IncomingMedication, unit_aliases: dict[str, str]
     if not dose_text:
         return None, None
 
-    match = _DOSE_PATTERN.match(dose_text)
+    # Accept common free-text SIG formats by parsing the first numeric + unit token.
+    match = _DOSE_PATTERN.search(dose_text)
     if not match:
         return None, None
 

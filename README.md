@@ -21,10 +21,12 @@ pytest
 - Ingest medication lists by source (clinic_emr, hospital_discharge, patient_reported)
 - Normalize medication payloads to a canonical internal representation
 - Normalize equivalent dose units into mg for semantic comparison (for example 0.5 g == 500 mg)
+- Parse common free-text dose formats using first numeric+unit token (for example "500 mg tablet")
 - Normalize common frequency aliases (for example OD/QD and BID/BD)
 - Detect five conflict types with severity levels (low/medium/high/critical): duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
 - Execute conflict checks using rule objects to keep rule growth maintainable
 - Persist auditable conflict records with resolved/unresolved state and resolution metadata
+- Persist conflict detection context (rules hash and compared snapshot references) for reproducibility
 - Provide reporting endpoints:
 	- unresolved conflicts by clinic
 	- 30-day clinic summary with minimum conflict threshold
@@ -158,6 +160,7 @@ Architecture diagram (Mermaid): docs/architecture.md
 - captured_at must include timezone information.
 - Unparseable dose text: stored without dose signature; does not crash ingest.
 - Duplicate ingest payload for same source: no new snapshot version.
+- Duplicate ingest payload for same source is deduplicated only when payload hash, source_reference, and captured_at all match.
 
 ## Known Limitations and Next Steps
 1. Uses static rule file, not a clinical drug ontology.

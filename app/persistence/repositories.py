@@ -40,6 +40,7 @@ class MongoRepository:
         self.snapshots.create_index([("patient_id", ASCENDING), ("source", ASCENDING), ("version", ASCENDING)], unique=True)
         self.snapshots.create_index([("patient_id", ASCENDING), ("captured_at", DESCENDING)])
         self.conflicts.create_index([("clinic_id", ASCENDING), ("resolved", ASCENDING), ("last_seen_at", DESCENDING)])
+        self.conflicts.create_index([("last_seen_at", DESCENDING)])
         self.conflicts.create_index([("patient_id", ASCENDING), ("conflict_key", ASCENDING)], unique=True)
         self.conflict_events.create_index([("patient_id", ASCENDING), ("occurred_at", DESCENDING)])
         self.conflict_events.create_index([("conflict_id", ASCENDING), ("occurred_at", DESCENDING)])
@@ -120,12 +121,22 @@ class MongoRepository:
         medications: list[dict[str, Any]],
     ) -> tuple[dict[str, Any], bool]:
         latest = self.get_latest_snapshot(patient_id, source)
-        if latest and latest.get("payload_hash") == payload_hash:
+        if (
+            latest
+            and latest.get("payload_hash") == payload_hash
+            and latest.get("source_reference") == source_reference
+            and latest.get("captured_at") == captured_at
+        ):
             return latest, False
 
         for attempt in range(MAX_SNAPSHOT_RETRIES):
             latest = self.get_latest_snapshot(patient_id, source)
-            if latest and latest.get("payload_hash") == payload_hash:
+            if (
+                latest
+                and latest.get("payload_hash") == payload_hash
+                and latest.get("source_reference") == source_reference
+                and latest.get("captured_at") == captured_at
+            ):
                 return latest, False
 
             version = 1 if not latest else latest["version"] + 1
@@ -164,6 +175,7 @@ class MongoRepository:
                 "$set": {
                     "summary": conflict_doc["summary"],
                     "details": conflict_doc["details"],
+                    "detection_context": conflict_doc.get("detection_context", {}),
                     "severity": conflict_doc.get("severity"),
                     "involved_drugs": conflict_doc["involved_drugs"],
                     "involved_sources": conflict_doc["involved_sources"],
@@ -332,7 +344,7 @@ class MongoRepository:
     def get_30d_conflict_summary(self, min_conflicts: int = 2) -> list[dict[str, Any]]:
         since = utc_now() - timedelta(days=30)
         pipeline = [
-            {"$match": {"created_at": {"$gte": since}}},
+            {"$match": {"last_seen_at": {"$gte": since}}},
             {
                 "$group": {
                     "_id": {"clinic_id": "$clinic_id", "patient_id": "$patient_id"},
@@ -454,7 +466,12 @@ class InMemoryRepository:
         medications: list[dict[str, Any]],
     ) -> tuple[dict[str, Any], bool]:
         latest = self.get_latest_snapshot(patient_id, source)
-        if latest and latest.get("payload_hash") == payload_hash:
+        if (
+            latest
+            and latest.get("payload_hash") == payload_hash
+            and latest.get("source_reference") == source_reference
+            and latest.get("captured_at") == captured_at
+        ):
             return latest, False
 
         version = 1 if not latest else latest["version"] + 1
@@ -485,6 +502,7 @@ class InMemoryRepository:
                 {
                     "summary": conflict_doc["summary"],
                     "details": conflict_doc["details"],
+                    "detection_context": conflict_doc.get("detection_context", {}),
                     "severity": conflict_doc.get("severity"),
                     "involved_drugs": conflict_doc["involved_drugs"],
                     "involved_sources": conflict_doc["involved_sources"],
@@ -627,7 +645,7 @@ class InMemoryRepository:
         since = utc_now() - timedelta(days=30)
         per_patient: dict[tuple[str, str], int] = defaultdict(int)
         for conflict in self.conflicts.values():
-            if conflict["created_at"] >= since:
+            if conflict["last_seen_at"] >= since:
                 per_patient[(conflict["clinic_id"], conflict["patient_id"])] += 1
 
         per_clinic: dict[str, int] = defaultdict(int)

@@ -10,7 +10,8 @@
   },
   "drug_name_aliases": {
     "metformin extended release": "metformin er",
-    "tylenol": "acetaminophen"
+    "tylenol": "acetaminophen",
+    "paracetamol": "acetaminophen"
   },
   "blacklisted_class_combinations": [
     ["ace inhibitor", "arb"],

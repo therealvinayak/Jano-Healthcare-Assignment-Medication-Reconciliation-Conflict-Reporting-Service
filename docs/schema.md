@@ -35,6 +35,9 @@ Why: Immutable snapshot history allows longitudinal traceability and source-spec
 - involved_sources: string[]
 - summary: string
 - details: object
+- detection_context: object
+  - rules_hash: string
+  - compared_snapshots: map[source -> {snapshot_id, version, captured_at}]
 - conflict_key: string (deterministic hash)
 - resolved: boolean
 - resolution_reason: string | null
@@ -60,6 +63,7 @@ Why: Separate conflict records improve auditability and make cross-patient repor
 
 ## Versioning Decision
 A new snapshot version is created only when the incoming normalized medication payload hash differs from the latest snapshot for the same patient and source.
+Additionally, same payload with different source_reference or captured_at creates a new version to preserve source-provenance timeline.
 
 Benefits:
 - Preserves clinically relevant change history
@@ -67,3 +71,6 @@ Benefits:
 
 Trade-off:
 - Hash-based semantic equality may miss nuanced differences not represented in normalized fields.
+
+## Reporting Window Semantics
+- 30-day summary uses `last_seen_at` to count conflicts that were active/reopened within the window, even if first detected earlier.

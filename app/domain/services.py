@@ -64,6 +64,7 @@ class MedicationService:
         ]
         stable_payload = stable_medication_payload(normalized_medications)
         payload_hash = _stable_hash(stable_payload)
+        rules_hash = _stable_hash(self.rules)
 
         source = request.source.value
         try:
@@ -83,13 +84,24 @@ class MedicationService:
 
         latest_snapshots = self.repository.get_latest_snapshots_for_patient(request.patient_id)
         source_medications = {}
+        compared_snapshots: dict[str, dict[str, Any]] = {}
         for snapshot_source, latest_snapshot in latest_snapshots.items():
             source_medications[SourceType(snapshot_source)] = [
                 CanonicalMedication.model_validate(med)
                 for med in latest_snapshot.get("medications", [])
             ]
+            compared_snapshots[snapshot_source] = {
+                "snapshot_id": latest_snapshot.get("_id"),
+                "version": latest_snapshot.get("version"),
+                "captured_at": latest_snapshot.get("captured_at"),
+            }
 
         source_medications[request.source] = normalized_medications
+        compared_snapshots[source] = {
+            "snapshot_id": snapshot.get("_id"),
+            "version": snapshot.get("version"),
+            "captured_at": snapshot.get("captured_at"),
+        }
 
         blacklisted_combinations = self.rules.get("blacklisted_class_combinations", [])
         detected = detect_conflicts(source_medications, blacklisted_combinations)
@@ -118,6 +130,10 @@ class MedicationService:
                     "summary": conflict.summary,
                     "details": conflict.details,
                     "conflict_key": conflict_key,
+                    "detection_context": {
+                        "rules_hash": rules_hash,
+                        "compared_snapshots": compared_snapshots,
+                    },
                 }
             )
             upserted_conflicts.append(saved)

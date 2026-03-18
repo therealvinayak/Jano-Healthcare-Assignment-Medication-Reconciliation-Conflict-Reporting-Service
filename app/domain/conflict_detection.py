@@ -20,7 +20,8 @@ def _active_medications_by_drug(
     by_drug: dict[str, list[tuple[SourceType, CanonicalMedication]]] = defaultdict(list)
     for source, meds in source_medications.items():
         for med in meds:
-            if med.status != MedicationStatus.STOPPED:
+            # UNKNOWN status should not be treated as active for high-confidence mismatches.
+            if med.status == MedicationStatus.ACTIVE:
                 by_drug[med.drug_name].append((source, med))
     return by_drug
 
@@ -90,8 +91,12 @@ def detect_dose_mismatches(
         if len(values) < 2:
             continue
 
-        dose_set = {med.dose_signature for _, med in values if med.dose_signature}
-        if len(dose_set) <= 1:
+        observed_doses = {
+            source.value: (med.dose_signature or "unknown") for source, med in values
+        }
+        dose_set = set(observed_doses.values())
+        has_known_dose = any(value != "unknown" for value in dose_set)
+        if len(dose_set) <= 1 or not has_known_dose:
             continue
 
         sources = sorted({source for source, _ in values}, key=lambda s: s.value)
@@ -104,6 +109,7 @@ def detect_dose_mismatches(
                 summary=f"Dose mismatch for {drug_name}",
                 details={
                     "doses": sorted(dose_set),
+                    "observed_by_source": observed_doses,
                 },
             )
         )
@@ -121,8 +127,12 @@ def detect_frequency_mismatches(
         if len(values) < 2:
             continue
 
-        frequency_set = {med.frequency for _, med in values if med.frequency}
-        if len(frequency_set) <= 1:
+        observed_frequencies = {
+            source.value: (med.frequency or "unknown") for source, med in values
+        }
+        frequency_set = set(observed_frequencies.values())
+        has_known_frequency = any(value != "unknown" for value in frequency_set)
+        if len(frequency_set) <= 1 or not has_known_frequency:
             continue
 
         sources = sorted({source for source, _ in values}, key=lambda s: s.value)
@@ -135,6 +145,7 @@ def detect_frequency_mismatches(
                 summary=f"Frequency mismatch for {drug_name}",
                 details={
                     "frequencies": sorted(frequency_set),
+                    "observed_by_source": observed_frequencies,
                 },
             )
         )

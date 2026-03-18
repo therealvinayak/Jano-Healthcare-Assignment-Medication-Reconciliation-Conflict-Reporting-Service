@@ -208,3 +208,163 @@ def test_ingest_same_payload_is_idempotent_for_snapshot_version(client):
     assert second.status_code == 200
     assert first.json()["snapshot_version"] == second.json()["snapshot_version"]
     assert second.json()["created_new_version"] is False
+
+
+def test_ingest_detects_frequency_mismatch_when_frequency_missing_in_one_source(client):
+    patient_id = _create_patient(client)
+
+    clinic_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "clinic_emr",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Metformin",
+                    "dose_value": 500,
+                    "dose_unit": "mg",
+                    "frequency": "once daily",
+                    "status": "active",
+                }
+            ],
+        },
+    )
+    assert clinic_ingest.status_code == 200
+
+    hospital_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "hospital_discharge",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Metformin",
+                    "dose_value": 500,
+                    "dose_unit": "mg",
+                    "status": "active",
+                }
+            ],
+        },
+    )
+    assert hospital_ingest.status_code == 200
+    conflict_types = {c["conflict_type"] for c in hospital_ingest.json()["conflicts"]}
+    assert "frequency_mismatch" in conflict_types
+
+
+def test_ingest_aliases_paracetamol_to_acetaminophen(client):
+    patient_id = _create_patient(client)
+
+    clinic_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "clinic_emr",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Acetaminophen",
+                    "dose_value": 500,
+                    "dose_unit": "mg",
+                    "status": "active",
+                }
+            ],
+        },
+    )
+    assert clinic_ingest.status_code == 200
+
+    hospital_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "hospital_discharge",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Paracetamol",
+                    "dose_value": 500,
+                    "dose_unit": "mg",
+                    "status": "active",
+                }
+            ],
+        },
+    )
+
+    assert hospital_ingest.status_code == 200
+    assert hospital_ingest.json()["conflict_count"] == 0
+
+
+def test_ingest_unknown_status_is_not_treated_as_active_for_dose_mismatch(client):
+    patient_id = _create_patient(client)
+
+    clinic_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "clinic_emr",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Lisinopril",
+                    "dose_value": 10,
+                    "dose_unit": "mg",
+                    "status": "active",
+                }
+            ],
+        },
+    )
+    assert clinic_ingest.status_code == 200
+
+    hospital_ingest = client.post(
+        "/api/v1/medications/ingest",
+        json={
+            "patient_id": patient_id,
+            "source": "hospital_discharge",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "medications": [
+                {
+                    "name": "Lisinopril",
+                    "dose_value": 20,
+                    "dose_unit": "mg",
+                    "status": "unknown",
+                }
+            ],
+        },
+    )
+
+    assert hospital_ingest.status_code == 200
+    conflict_types = {c["conflict_type"] for c in hospital_ingest.json()["conflicts"]}
+    assert "dose_mismatch" not in conflict_types
+
+
+def test_ingest_same_payload_with_new_source_reference_creates_new_version(client):
+    patient_id = _create_patient(client)
+
+    base_payload = {
+        "patient_id": patient_id,
+        "source": "clinic_emr",
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "medications": [
+            {
+                "name": "Amlodipine",
+                "dose_value": 5,
+                "dose_unit": "mg",
+                "status": "active",
+            }
+        ],
+    }
+
+    first = client.post(
+        "/api/v1/medications/ingest",
+        json={**base_payload, "source_reference": "encounter-1"},
+    )
+    second = client.post(
+        "/api/v1/medications/ingest",
+        json={**base_payload, "source_reference": "encounter-2"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["created_new_version"] is True
+    assert second.json()["snapshot_version"] == first.json()["snapshot_version"] + 1
