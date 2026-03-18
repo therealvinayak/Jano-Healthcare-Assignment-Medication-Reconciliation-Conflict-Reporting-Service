@@ -45,7 +45,9 @@ pytest
 	- [tests/api/test_validation_errors.py](tests/api/test_validation_errors.py)
 
 ### Important Sections
-- Known limitations: [Known Limitations and Next Steps](#known-limitations-and-next-steps)
+- Recruiter summary: [Recruiter-Facing Architecture Summary](#recruiter-facing-architecture-summary)
+- Demo script: [60-Second Interview Demo Script](#60-second-interview-demo-script)
+- Known limitations: [Known Limitations with Mitigation Roadmap](#known-limitations-with-mitigation-roadmap)
 - AI usage disclosure: [AI Usage Disclosure](#ai-usage-disclosure)
 - Release checklist: [Release Checklist (Assignment 2)](#release-checklist-assignment-2)
 
@@ -112,6 +114,37 @@ Request flow:
 
 Architecture diagram (Mermaid): docs/architecture.md
 
+## Recruiter-Facing Architecture Summary
+This service is a FastAPI + MongoDB medication reconciliation backend designed for high-risk, multi-source clinical data.
+
+- It ingests medication lists from three sources: clinic EMR, hospital discharge, and patient-reported.
+- Incoming medications are normalized into a canonical model (name aliasing, dose/unit normalization, frequency normalization).
+- Each ingest writes an immutable, source-scoped longitudinal snapshot with explicit versioning behavior for auditability.
+- A conflict engine detects clinically relevant discrepancies across latest source states:
+	- same drug, different dose
+	- frequency mismatch
+	- active vs stopped mismatch
+	- duplicate entries in a source
+	- blacklisted drug-class combinations
+- Conflicts are stored with lifecycle metadata (unresolved/resolved), resolution reason, chosen source, resolver, timestamps, and detection context.
+- Reporting endpoints provide operational visibility:
+	- unresolved conflicts by clinic/patient
+	- 30-day clinic summary for patients above a conflict threshold
+- Architecture is separated across API routes, domain logic, and persistence, with tests for ingestion, conflict logic, validation, and reporting.
+
+## 60-Second Interview Demo Script
+"I will walk through the core flow quickly.
+
+First, I create a patient. Then I ingest medications from clinic_emr and hospital_discharge. During ingestion, medications are normalized into a canonical representation so equivalent forms compare reliably.
+
+Next, the conflict engine evaluates latest source snapshots and persists auditable conflict records with severity, evidence, and lifecycle metadata.
+
+Versioning is source-scoped and immutable. If I re-ingest an identical payload with identical provenance fields, the version is deduplicated; if provenance differs, a new version is created to preserve timeline fidelity.
+
+From there, I can call unresolved conflicts by clinic for triage and the 30-day summary endpoint for operational reporting.
+
+Finally, I resolve a conflict with a resolution reason and chosen source. The system stores resolution metadata and maintains conflict event history for traceability."
+
 ## Clinical Assumptions and Trade-offs
 1. Dose conflict rule
 - Same normalized drug name with differing dose signatures across active sources is flagged.
@@ -159,20 +192,34 @@ Architecture diagram (Mermaid): docs/architecture.md
 - Ingest requests must include at least one medication.
 - captured_at must include timezone information.
 - Unparseable dose text: stored without dose signature; does not crash ingest.
-- Duplicate ingest payload for same source: no new snapshot version.
 - Duplicate ingest payload for same source is deduplicated only when payload hash, source_reference, and captured_at all match.
 
-## Known Limitations and Next Steps
-1. Uses static rule file, not a clinical drug ontology.
-2. No authentication/authorization.
-3. Frequency normalization is still lexical and does not cover all clinical shorthand variants.
-4. Duplicate detection is currently source-scoped and may require clinician workflow tuning in production.
-5. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
-6. Next steps:
-- Add user identity and audit trail per action.
-- Add richer normalization (brand/generic mapping).
-- Add pagination and cursor-based reporting APIs.
+## Known Limitations with Mitigation Roadmap
+### Known Limitations
+1. Clinical ontology depth is limited.
+- Current synonym handling uses static aliases, not a complete medication terminology graph.
+2. Ingest write flow is not transaction-bound end-to-end.
+- Snapshot writes and conflict state updates are consistent by design but not wrapped in a single MongoDB transaction.
+3. Concurrency validation is limited in automated tests.
+- Most tests run on the in-memory repository; real MongoDB contention scenarios have lighter coverage.
+4. Access control is not production-complete.
+- Authentication/authorization and policy enforcement are intentionally out of assignment scope.
+5. Observability is basic.
+- Structured tracing, SLO alerting, and deeper operational dashboards are not fully implemented.
 
+### Mitigation Roadmap
+1. Phase 1: Clinical correctness hardening.
+- Integrate standards-based medication terminology mapping.
+- Expand rule configuration for richer dose/frequency semantics and confidence scoring.
+2. Phase 2: Data integrity hardening.
+- Introduce MongoDB transactions for ingest + conflict lifecycle transitions.
+- Persist deterministic reconciliation-run artifacts for replay and forensic audits.
+3. Phase 3: Reliability and scale.
+- Add concurrency-heavy integration tests against real MongoDB.
+- Expand indexing strategy and validate query cost under load.
+4. Phase 4: Production readiness.
+- Add authn/authz, access audits, and PHI-safe operational controls.
+- Add structured telemetry (trace IDs, event metrics, latency/error budgets).
 ## AI Usage Disclosure
 1. AI used for
 - Initial scaffold planning, boilerplate route/repository generation, and test case brainstorming.
@@ -194,3 +241,4 @@ Architecture diagram (Mermaid): docs/architecture.md
 - [x] Smoke-flow evidence documented: docs/smoke_evidence.md
 - [x] Postman collection export included: docs/postman/Medication-Reconciliation-Smoke.postman_collection.json
 - [x] One-page architecture diagram included: docs/architecture.md
+
