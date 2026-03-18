@@ -2,6 +2,10 @@
 
 FastAPI + MongoDB MVP for ingesting multi-source medication lists, detecting unresolved conflicts, and reporting conflicts at clinic level.
 
+## Live Demo
+- API Docs: https://med-reconciliation.onrender.com/docs
+- Health Check: https://med-reconciliation.onrender.com/health
+
 ## Submission Snapshot
 ### Quick Start
 ```bash
@@ -94,6 +98,32 @@ If local MongoDB is not available, the smoke script runs the same API endpoints 
 ```bash
 pytest
 ```
+
+## Deploy (Render + MongoDB Atlas)
+### Render Service Settings
+- Runtime: Python 3.11.9 (matches runtime.txt)
+- Build command:
+```bash
+pip install -r requirements.txt
+```
+- Start command:
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+### Environment Variables (Render)
+Set these in Render dashboard Environment:
+```bash
+MONGODB_URI=mongodb+srv://<db_user>:<url_encoded_db_password>@<cluster-host>/med_reconciliation?retryWrites=true&w=majority
+MONGODB_DB=med_reconciliation
+ENVIRONMENT=production
+```
+
+Notes:
+- Do not commit real credentials to GitHub.
+- If password contains special characters, URL-encode it (for example @ -> %40).
+- Atlas Network Access must allow Render egress (for demo, 0.0.0.0/0).
+- Atlas DB user must have readWrite on med_reconciliation.
 
 ## Architecture Overview
 The system is structured into four layers.
