@@ -35,6 +35,12 @@ Generates request/response evidence in docs/smoke_evidence.md.
 
 If local MongoDB is not available, the smoke script runs the same API endpoints with an in-memory repository override to keep the demo reproducible.
 
+## Postman Collection (Smoke Flow)
+- Import: docs/postman/Medication-Reconciliation-Smoke.postman_collection.json
+- Set collection variable baseUrl if needed (default: http://127.0.0.1:8000)
+- Run requests top-to-bottom to execute the smoke path:
+	- healthcheck -> create patient -> ingest clinic -> ingest hospital -> unresolved report -> resolve conflict -> 30-day summary
+
 ## Test
 ```bash
 pytest
@@ -58,6 +64,8 @@ The system is structured into four layers.
 
 Request flow:
 - Ingest request -> normalize medications -> compare against latest source snapshot -> create version only on semantic change -> detect conflicts across latest sources -> upsert unresolved conflicts -> auto-resolve no-longer-detected conflicts -> return summary.
+
+Architecture diagram (Mermaid): docs/architecture.md
 
 ## Clinical Assumptions and Trade-offs
 1. Dose conflict rule
@@ -110,3 +118,15 @@ Request flow:
 
 3. One disagreement with AI output
 - Rejected a proposed approach that embedded conflicts directly inside snapshots because it would complicate clinic-level unresolved conflict reporting and indexing.
+
+## Release Checklist (Assignment 2)
+- [x] MongoDB schema description and indexing rationale documented: docs/schema.md
+- [x] FastAPI service implemented with ingest, normalization, conflict detection, and reporting endpoints
+- [x] Synthetic dataset generator included (12 patients with varied conflicts): scripts/seed_data.py
+- [x] Tests added for core requirements:
+	- [x] Conflict detection edge cases (dose mismatch, stopped mismatch, class combination)
+	- [x] Missing fields and malformed payload handling (validation error tests)
+	- [x] At least one aggregation endpoint
+- [x] Smoke-flow evidence documented: docs/smoke_evidence.md
+- [x] Postman collection export included: docs/postman/Medication-Reconciliation-Smoke.postman_collection.json
+- [x] One-page architecture diagram included: docs/architecture.md

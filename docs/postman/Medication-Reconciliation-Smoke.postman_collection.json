@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "Medication Reconciliation Smoke Flow",
+    "_postman_id": "3d5e986e-4cc4-4c80-b79b-c65285521a55",
+    "description": "Small smoke-flow collection for Assignment 2. Run in order from top to bottom.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Healthcheck",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Create Patient",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Create patient status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('patientId', body.id);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"clinic_id\": \"clinic-demo\",\n  \"first_name\": \"Nora\",\n  \"last_name\": \"Miles\",\n  \"date_of_birth\": \"1982-06-21T00:00:00Z\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/patients",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "patients"]
+        }
+      }
+    },
+    {
+      "name": "Ingest Clinic EMR",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Clinic ingest status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patient_id\": \"{{patientId}}\",\n  \"source\": \"clinic_emr\",\n  \"captured_at\": \"{{$isoTimestamp}}\",\n  \"medications\": [\n    {\n      \"name\": \"Lisinopril\",\n      \"dose_value\": 10,\n      \"dose_unit\": \"mg\",\n      \"status\": \"active\",\n      \"drug_class\": \"ace inhibitor\"\n    },\n    {\n      \"name\": \"Warfarin\",\n      \"dose_value\": 5,\n      \"dose_unit\": \"mg\",\n      \"status\": \"active\",\n      \"drug_class\": \"anticoagulant\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/medications/ingest",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "medications", "ingest"]
+        }
+      }
+    },
+    {
+      "name": "Ingest Hospital Discharge",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Hospital ingest status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "pm.test('Conflicts are detected', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.conflict_count).to.be.above(0);",
+              "  pm.collectionVariables.set('conflictId', body.conflicts[0]._id);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"patient_id\": \"{{patientId}}\",\n  \"source\": \"hospital_discharge\",\n  \"captured_at\": \"{{$isoTimestamp}}\",\n  \"medications\": [\n    {\n      \"name\": \"Lisinopril\",\n      \"dose_value\": 20,\n      \"dose_unit\": \"mg\",\n      \"status\": \"active\",\n      \"drug_class\": \"ace inhibitor\"\n    },\n    {\n      \"name\": \"Warfarin\",\n      \"dose_value\": 5,\n      \"dose_unit\": \"mg\",\n      \"status\": \"stopped\",\n      \"drug_class\": \"anticoagulant\"\n    },\n    {\n      \"name\": \"Ibuprofen\",\n      \"dose_value\": 400,\n      \"dose_unit\": \"mg\",\n      \"status\": \"active\",\n      \"drug_class\": \"nsaid\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/medications/ingest",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "medications", "ingest"]
+        }
+      }
+    },
+    {
+      "name": "Unresolved Conflicts by Clinic",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/reports/clinics/clinic-demo/unresolved-conflicts",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "reports", "clinics", "clinic-demo", "unresolved-conflicts"]
+        }
+      }
+    },
+    {
+      "name": "Resolve First Conflict",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"resolution_reason\": \"Reviewed by clinician\",\n  \"chosen_source\": \"clinic_emr\",\n  \"resolver\": \"nurse.alex\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/conflicts/{{conflictId}}/resolve",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "conflicts", "{{conflictId}}", "resolve"]
+        }
+      }
+    },
+    {
+      "name": "30-Day Conflict Summary",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/reports/conflicts-30d?min_conflicts=2",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "reports", "conflicts-30d"],
+          "query": [
+            {
+              "key": "min_conflicts",
+              "value": "2"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "patientId",
+      "value": ""
+    },
+    {
+      "key": "conflictId",
+      "value": ""
+    }
+  ]
+}
