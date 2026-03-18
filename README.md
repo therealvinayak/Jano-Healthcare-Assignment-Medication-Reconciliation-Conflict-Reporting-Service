@@ -20,7 +20,7 @@ pytest
 ### What Is Implemented
 - Ingest medication lists by source (clinic_emr, hospital_discharge, patient_reported)
 - Normalize medication payloads to a canonical internal representation
-- Detect three conflict types: dose mismatch, blacklisted class combination, active vs stopped mismatch
+- Detect five conflict types: duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
 - Persist auditable conflict records with resolved/unresolved state and resolution metadata
 - Provide reporting endpoints:
 	- unresolved conflicts by clinic
@@ -113,9 +113,18 @@ Architecture diagram (Mermaid): docs/architecture.md
 1. Dose conflict rule
 - Same normalized drug name with differing dose signatures across active sources is flagged.
 
+1.5. Frequency conflict rule
+- Same normalized drug name with differing frequencies across active sources is flagged.
+
+1.6. Duplicate entry rule
+- Multiple active entries for the same normalized drug within the same source are flagged as potential duplicate therapy documentation.
+
 2. Class combination rule
 - Static blacklisted class pairs in config/conflict_rules.json represent unsafe combinations.
 - This is a simplification and not a substitute for a real drug-interaction database.
+
+2.5. Drug-name normalization
+- Drug names are lowercased, punctuation-normalized, and can be mapped through config/conflict_rules.json aliases (for example, tylenol -> acetaminophen).
 
 3. Stopped mismatch rule
 - A medication marked active in one source and stopped in another is flagged.
@@ -138,6 +147,10 @@ Architecture diagram (Mermaid): docs/architecture.md
 ## Failure Modes and Handling
 - Missing patient on ingest: 404.
 - Invalid payload shape: 422 (Pydantic validation).
+- Blank or whitespace-only required string fields are rejected.
+- Non-positive dose values are rejected.
+- Ingest requests must include at least one medication.
+- captured_at must include timezone information.
 - Unparseable dose text: stored without dose signature; does not crash ingest.
 - Duplicate ingest payload for same source: no new snapshot version.
 
@@ -145,8 +158,10 @@ Architecture diagram (Mermaid): docs/architecture.md
 1. Uses static rule file, not a clinical drug ontology.
 2. No authentication/authorization.
 3. Conflict severity scoring is not implemented.
-4. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
-5. Next steps:
+4. Frequency normalization is lexical and does not yet map semantically equivalent strings (for example, qd vs once daily).
+5. Duplicate detection is currently source-scoped and may require clinician workflow tuning in production.
+6. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
+7. Next steps:
 - Add user identity and audit trail per action.
 - Add richer normalization (brand/generic mapping).
 - Add pagination and cursor-based reporting APIs.

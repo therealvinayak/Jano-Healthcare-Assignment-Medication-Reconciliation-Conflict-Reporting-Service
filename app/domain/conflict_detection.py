@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import groupby
 
 from app.domain.models import (
     CanonicalMedication,
@@ -48,6 +49,86 @@ def detect_dose_mismatches(
                 },
             )
         )
+
+    return conflicts
+
+
+def detect_frequency_mismatches(
+    source_medications: dict[SourceType, list[CanonicalMedication]],
+) -> list[ConflictCandidate]:
+    conflicts: list[ConflictCandidate] = []
+    by_drug = _active_medications_by_drug(source_medications)
+
+    for drug_name, values in by_drug.items():
+        if len(values) < 2:
+            continue
+
+        frequency_set = {med.frequency for _, med in values if med.frequency}
+        if len(frequency_set) <= 1:
+            continue
+
+        sources = sorted({source for source, _ in values}, key=lambda s: s.value)
+        conflicts.append(
+            ConflictCandidate(
+                conflict_type=ConflictType.FREQUENCY_MISMATCH,
+                involved_drugs=[drug_name],
+                involved_sources=sources,
+                summary=f"Frequency mismatch for {drug_name}",
+                details={
+                    "frequencies": sorted(frequency_set),
+                },
+            )
+        )
+
+    return conflicts
+
+
+def detect_duplicate_entries(
+    source_medications: dict[SourceType, list[CanonicalMedication]],
+) -> list[ConflictCandidate]:
+    conflicts: list[ConflictCandidate] = []
+
+    for source, meds in source_medications.items():
+        active = [med for med in meds if med.status != MedicationStatus.STOPPED]
+        active.sort(
+            key=lambda med: (
+                med.drug_name,
+                med.dose_signature or "",
+                med.frequency or "",
+                med.route or "",
+            )
+        )
+
+        for drug_name, group in groupby(active, key=lambda med: med.drug_name):
+            duplicates = list(group)
+            if len(duplicates) < 2:
+                continue
+
+            signatures = sorted(
+                {
+                    " | ".join(
+                        [
+                            med.dose_signature or "unknown dose",
+                            med.frequency or "unknown frequency",
+                            med.route or "unknown route",
+                        ]
+                    )
+                    for med in duplicates
+                }
+            )
+            conflicts.append(
+                ConflictCandidate(
+                    conflict_type=ConflictType.DUPLICATE_ENTRY,
+                    involved_drugs=[drug_name],
+                    involved_sources=[source],
+                    summary=f"Duplicate active entries for {drug_name} in {source.value}",
+                    details={
+                        "source": source.value,
+                        "duplicate_count": len(duplicates),
+                        "signatures": signatures,
+                    },
+                )
+            )
 
     return conflicts
 
@@ -126,7 +207,9 @@ def detect_conflicts(
     blacklisted_class_combinations: list[list[str]],
 ) -> list[ConflictCandidate]:
     conflicts = []
+    conflicts.extend(detect_duplicate_entries(source_medications))
     conflicts.extend(detect_dose_mismatches(source_medications))
+    conflicts.extend(detect_frequency_mismatches(source_medications))
     conflicts.extend(detect_stopped_mismatches(source_medications))
     conflicts.extend(
         detect_blacklisted_class_combinations(source_medications, blacklisted_class_combinations)

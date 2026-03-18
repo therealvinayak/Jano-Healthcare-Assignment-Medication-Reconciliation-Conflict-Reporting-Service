@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -21,7 +22,7 @@ def install_error_handlers(app: FastAPI) -> None:
             content=_error_body(
                 code="validation_error",
                 message="Request validation failed",
-                details=exc.errors(),
+                details=jsonable_encoder(exc.errors()),
             ),
         )
 

@@ -7,6 +7,7 @@ from app.domain.models import CanonicalMedication, IncomingMedication
 
 
 _DOSE_PATTERN = re.compile(r"^(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>[a-zA-Z]+)$")
+_NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 def normalize_text(value: str | None) -> str | None:
@@ -14,6 +15,17 @@ def normalize_text(value: str | None) -> str | None:
         return None
     cleaned = " ".join(value.strip().lower().split())
     return cleaned or None
+
+
+def normalize_drug_name(value: str | None, aliases: dict[str, str]) -> str | None:
+    normalized = normalize_text(value)
+    if normalized is None:
+        return None
+    compact = _NON_ALNUM_PATTERN.sub(" ", normalized)
+    compact = " ".join(compact.split())
+    if compact in aliases:
+        return aliases[compact]
+    return compact
 
 
 def normalize_unit(unit: str | None, unit_aliases: dict[str, str]) -> str | None:
@@ -50,10 +62,15 @@ def build_dose_signature(value: float | None, unit: str | None) -> str | None:
     return f"{value:g} {unit}"
 
 
-def normalize_medication(item: IncomingMedication, unit_aliases: dict[str, str]) -> CanonicalMedication:
+def normalize_medication(
+    item: IncomingMedication,
+    unit_aliases: dict[str, str],
+    drug_aliases: dict[str, str] | None = None,
+) -> CanonicalMedication:
     dose_value, dose_unit = parse_dose_value_unit(item, unit_aliases)
+    aliases = drug_aliases or {}
     return CanonicalMedication(
-        drug_name=normalize_text(item.name) or "unknown",
+        drug_name=normalize_drug_name(item.name, aliases) or "unknown",
         dose_value=dose_value,
         dose_unit=dose_unit,
         dose_signature=build_dose_signature(dose_value, dose_unit),

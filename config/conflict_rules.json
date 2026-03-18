@@ -8,6 +8,10 @@
     "g": "g",
     "gram": "g"
   },
+  "drug_name_aliases": {
+    "metformin extended release": "metformin er",
+    "tylenol": "acetaminophen"
+  },
   "blacklisted_class_combinations": [
     ["ace inhibitor", "arb"],
     ["nsaid", "anticoagulant"]

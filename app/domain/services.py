@@ -50,7 +50,10 @@ class MedicationService:
             raise ValueError("patient_not_found")
 
         unit_aliases = self.rules.get("unit_aliases", {})
-        normalized_medications = [normalize_medication(item, unit_aliases) for item in request.medications]
+        drug_aliases = self.rules.get("drug_name_aliases", {})
+        normalized_medications = [
+            normalize_medication(item, unit_aliases, drug_aliases) for item in request.medications
+        ]
         stable_payload = stable_medication_payload(normalized_medications)
         payload_hash = _stable_hash(stable_payload)
 
@@ -134,3 +137,34 @@ class MedicationService:
             chosen_source=chosen_source,
             resolver=request.resolver,
         )
+
+    def get_unresolved_conflicts_by_clinic(self, clinic_id: str) -> dict[str, Any]:
+        rows = self.repository.get_unresolved_patients_by_clinic(clinic_id)
+        return {
+            "clinic_id": clinic_id,
+            "patients_with_unresolved_conflicts": len(rows),
+            "patients": rows,
+        }
+
+    def get_conflict_summary_30d(self, min_conflicts: int = 2) -> dict[str, Any]:
+        return {
+            "window_days": 30,
+            "minimum_conflicts": min_conflicts,
+            "results": self.repository.get_30d_conflict_summary(min_conflicts=min_conflicts),
+        }
+
+    def get_patient_history(self, patient_id: str) -> dict[str, Any]:
+        snapshots = self.repository.get_patient_history(patient_id)
+        return {
+            "patient_id": patient_id,
+            "versions": [
+                {
+                    "snapshot_id": row["_id"],
+                    "source": row["source"],
+                    "version": row["version"],
+                    "captured_at": row["captured_at"],
+                    "medications": row["medications"],
+                }
+                for row in snapshots
+            ],
+        }

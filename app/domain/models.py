@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SourceType(str, Enum):
@@ -21,13 +21,15 @@ class MedicationStatus(str, Enum):
 
 class ConflictType(str, Enum):
     DOSE_MISMATCH = "dose_mismatch"
+    FREQUENCY_MISMATCH = "frequency_mismatch"
+    DUPLICATE_ENTRY = "duplicate_entry"
     CLASS_COMBINATION = "class_combination"
     STOPPED_MISMATCH = "stopped_mismatch"
 
 
 class IncomingMedication(BaseModel):
     name: str = Field(min_length=1)
-    dose_value: float | None = None
+    dose_value: float | None = Field(default=None, gt=0)
     dose_unit: str | None = None
     dose_text: str | None = None
     frequency: str | None = None
@@ -35,13 +37,52 @@ class IncomingMedication(BaseModel):
     status: MedicationStatus = MedicationStatus.ACTIVE
     drug_class: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("name cannot be blank")
+        return cleaned
+
+    @field_validator("dose_unit", "dose_text", "frequency", "route", "drug_class", mode="before")
+    @classmethod
+    def normalize_optional_text_fields(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
 
 class IngestMedicationRequest(BaseModel):
     patient_id: str = Field(min_length=1)
     source: SourceType
     captured_at: datetime
-    medications: list[IncomingMedication] = Field(default_factory=list)
+    medications: list[IncomingMedication] = Field(default_factory=list, min_length=1)
     source_reference: str | None = None
+
+    @field_validator("patient_id")
+    @classmethod
+    def validate_patient_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("patient_id cannot be blank")
+        return cleaned
+
+    @field_validator("captured_at")
+    @classmethod
+    def validate_captured_at_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("captured_at must include timezone information")
+        return value
+
+    @field_validator("source_reference", mode="before")
+    @classmethod
+    def normalize_source_reference(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class CanonicalMedication(BaseModel):
@@ -91,6 +132,14 @@ class PatientCreateRequest(BaseModel):
     first_name: str = Field(min_length=1)
     last_name: str = Field(min_length=1)
     date_of_birth: datetime
+
+    @field_validator("clinic_id", "first_name", "last_name")
+    @classmethod
+    def validate_required_strings(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("field cannot be blank")
+        return cleaned
 
 
 class PatientResponse(BaseModel):

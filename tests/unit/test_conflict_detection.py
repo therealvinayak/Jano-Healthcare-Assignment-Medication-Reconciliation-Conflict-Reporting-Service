@@ -73,3 +73,54 @@ def test_detects_blacklisted_class_combination():
     )
 
     assert any(c.conflict_type.value == "class_combination" for c in conflicts)
+
+
+def test_detects_frequency_mismatch():
+    source_medications = {
+        SourceType.CLINIC_EMR: [
+            CanonicalMedication(
+                drug_name="metformin",
+                dose_signature="500 mg",
+                frequency="once daily",
+                status=MedicationStatus.ACTIVE,
+            )
+        ],
+        SourceType.HOSPITAL_DISCHARGE: [
+            CanonicalMedication(
+                drug_name="metformin",
+                dose_signature="500 mg",
+                frequency="twice daily",
+                status=MedicationStatus.ACTIVE,
+            )
+        ],
+    }
+
+    conflicts = detect_conflicts(source_medications, blacklisted_class_combinations=[])
+    assert any(c.conflict_type.value == "frequency_mismatch" for c in conflicts)
+
+
+def test_detects_duplicate_entries_in_single_source():
+    source_medications = {
+        SourceType.PATIENT_REPORTED: [
+            CanonicalMedication(
+                drug_name="atorvastatin",
+                dose_signature="40 mg",
+                frequency="once daily",
+                route="oral",
+                status=MedicationStatus.ACTIVE,
+            ),
+            CanonicalMedication(
+                drug_name="atorvastatin",
+                dose_signature="40 mg",
+                frequency="once daily",
+                route="oral",
+                status=MedicationStatus.ACTIVE,
+            ),
+        ]
+    }
+
+    conflicts = detect_conflicts(source_medications, blacklisted_class_combinations=[])
+    duplicate_conflicts = [c for c in conflicts if c.conflict_type.value == "duplicate_entry"]
+
+    assert len(duplicate_conflicts) == 1
+    assert duplicate_conflicts[0].details["duplicate_count"] == 2
