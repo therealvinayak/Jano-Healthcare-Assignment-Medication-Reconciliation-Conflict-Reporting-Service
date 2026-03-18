@@ -1,0 +1,15 @@
+{
+  "unit_aliases": {
+    "mg": "mg",
+    "milligram": "mg",
+    "milligrams": "mg",
+    "mcg": "mcg",
+    "microgram": "mcg",
+    "g": "g",
+    "gram": "g"
+  },
+  "blacklisted_class_combinations": [
+    ["ace inhibitor", "arb"],
+    ["nsaid", "anticoagulant"]
+  ]
+}
