@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from itertools import groupby
 
 from app.domain.models import (
     CanonicalMedication,
     ConflictCandidate,
+    ConflictSeverity,
     ConflictType,
     MedicationStatus,
     SourceType,
@@ -21,6 +23,61 @@ def _active_medications_by_drug(
             if med.status != MedicationStatus.STOPPED:
                 by_drug[med.drug_name].append((source, med))
     return by_drug
+
+
+class ConflictRule(ABC):
+    @abstractmethod
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        raise NotImplementedError
+
+
+class DoseMismatchRule(ConflictRule):
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        return detect_dose_mismatches(source_medications)
+
+
+class FrequencyMismatchRule(ConflictRule):
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        return detect_frequency_mismatches(source_medications)
+
+
+class DuplicateEntryRule(ConflictRule):
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        return detect_duplicate_entries(source_medications)
+
+
+class StoppedMismatchRule(ConflictRule):
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        return detect_stopped_mismatches(source_medications)
+
+
+class ClassCombinationRule(ConflictRule):
+    def evaluate(
+        self,
+        source_medications: dict[SourceType, list[CanonicalMedication]],
+        blacklisted_class_combinations: list[list[str]],
+    ) -> list[ConflictCandidate]:
+        return detect_blacklisted_class_combinations(source_medications, blacklisted_class_combinations)
 
 
 def detect_dose_mismatches(
@@ -41,6 +98,7 @@ def detect_dose_mismatches(
         conflicts.append(
             ConflictCandidate(
                 conflict_type=ConflictType.DOSE_MISMATCH,
+                severity=ConflictSeverity.HIGH,
                 involved_drugs=[drug_name],
                 involved_sources=sources,
                 summary=f"Dose mismatch for {drug_name}",
@@ -71,6 +129,7 @@ def detect_frequency_mismatches(
         conflicts.append(
             ConflictCandidate(
                 conflict_type=ConflictType.FREQUENCY_MISMATCH,
+                severity=ConflictSeverity.MEDIUM,
                 involved_drugs=[drug_name],
                 involved_sources=sources,
                 summary=f"Frequency mismatch for {drug_name}",
@@ -99,7 +158,15 @@ def detect_duplicate_entries(
             )
         )
 
-        for drug_name, group in groupby(active, key=lambda med: med.drug_name):
+        for drug_name, group in groupby(
+            active,
+            key=lambda med: (
+                med.drug_name,
+                med.dose_signature or "",
+                med.frequency or "",
+                med.route or "",
+            ),
+        ):
             duplicates = list(group)
             if len(duplicates) < 2:
                 continue
@@ -119,9 +186,10 @@ def detect_duplicate_entries(
             conflicts.append(
                 ConflictCandidate(
                     conflict_type=ConflictType.DUPLICATE_ENTRY,
-                    involved_drugs=[drug_name],
+                    severity=ConflictSeverity.LOW,
+                    involved_drugs=[drug_name[0]],
                     involved_sources=[source],
-                    summary=f"Duplicate active entries for {drug_name} in {source.value}",
+                    summary=f"Duplicate active entries for {drug_name[0]} in {source.value}",
                     details={
                         "source": source.value,
                         "duplicate_count": len(duplicates),
@@ -150,6 +218,7 @@ def detect_stopped_mismatches(
             conflicts.append(
                 ConflictCandidate(
                     conflict_type=ConflictType.STOPPED_MISMATCH,
+                    severity=ConflictSeverity.HIGH,
                     involved_drugs=[drug_name],
                     involved_sources=sources,
                     summary=f"{drug_name} is active in one source and stopped in another",
@@ -192,6 +261,7 @@ def detect_blacklisted_class_combinations(
         conflicts.append(
             ConflictCandidate(
                 conflict_type=ConflictType.CLASS_COMBINATION,
+                severity=ConflictSeverity.CRITICAL,
                 involved_drugs=involved_drugs,
                 involved_sources=involved_sources,
                 summary=f"Blacklisted class combination detected: {class_a} + {class_b}",
@@ -206,12 +276,14 @@ def detect_conflicts(
     source_medications: dict[SourceType, list[CanonicalMedication]],
     blacklisted_class_combinations: list[list[str]],
 ) -> list[ConflictCandidate]:
-    conflicts = []
-    conflicts.extend(detect_duplicate_entries(source_medications))
-    conflicts.extend(detect_dose_mismatches(source_medications))
-    conflicts.extend(detect_frequency_mismatches(source_medications))
-    conflicts.extend(detect_stopped_mismatches(source_medications))
-    conflicts.extend(
-        detect_blacklisted_class_combinations(source_medications, blacklisted_class_combinations)
-    )
+    rules: list[ConflictRule] = [
+        DuplicateEntryRule(),
+        DoseMismatchRule(),
+        FrequencyMismatchRule(),
+        StoppedMismatchRule(),
+        ClassCombinationRule(),
+    ]
+    conflicts: list[ConflictCandidate] = []
+    for rule in rules:
+        conflicts.extend(rule.evaluate(source_medications, blacklisted_class_combinations))
     return conflicts

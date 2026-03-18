@@ -20,7 +20,10 @@ pytest
 ### What Is Implemented
 - Ingest medication lists by source (clinic_emr, hospital_discharge, patient_reported)
 - Normalize medication payloads to a canonical internal representation
-- Detect five conflict types: duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
+- Normalize equivalent dose units into mg for semantic comparison (for example 0.5 g == 500 mg)
+- Normalize common frequency aliases (for example OD/QD and BID/BD)
+- Detect five conflict types with severity levels (low/medium/high/critical): duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
+- Execute conflict checks using rule objects to keep rule growth maintainable
 - Persist auditable conflict records with resolved/unresolved state and resolution metadata
 - Provide reporting endpoints:
 	- unresolved conflicts by clinic
@@ -52,13 +55,8 @@ pytest
 5. Run API server.
 
 ### Commands
-```bash
-python -m venv .venv
-.venv\Scripts\activate
+- Detect five conflict types with severity levels (low/medium/high/critical): duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
 pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload
-```
 
 API root: http://127.0.0.1:8000
 OpenAPI docs: http://127.0.0.1:8000/docs
@@ -80,26 +78,20 @@ If local MongoDB is not available, the smoke script runs the same API endpoints 
 ## Postman Collection (Smoke Flow)
 - Import: docs/postman/Medication-Reconciliation-Smoke.postman_collection.json
 - Set collection variable baseUrl if needed (default: http://127.0.0.1:8000)
-- Run requests top-to-bottom to execute the smoke path:
 	- healthcheck -> create patient -> ingest clinic -> ingest hospital -> unresolved report -> resolve conflict -> 30-day summary
 
-## Test
-```bash
 pytest
 ```
-
 ## Architecture Overview
 The system is structured into four layers.
-
 1. API layer
 - FastAPI routers and request/response contracts.
-
 2. Domain layer
 - Normalization and conflict detection business rules.
 - Service orchestrates versioning, conflict lifecycle, and ingest flow.
 
 3. Persistence layer
-- Mongo repository implementation with index initialization and reporting queries.
+- Snapshot creation uses retry-safe unique version indexing per patient+source to reduce race-condition risk under concurrent ingests.
 
 4. Config/data
 - Static conflict rules JSON and environment settings.

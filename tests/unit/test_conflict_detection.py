@@ -44,9 +44,12 @@ def test_detects_dose_mismatch_and_stopped_mismatch():
 
     conflicts = detect_conflicts(source_medications, blacklisted_class_combinations=[])
     conflict_types = {c.conflict_type.value for c in conflicts}
+    severities = {c.conflict_type.value: c.severity.value for c in conflicts}
 
     assert "dose_mismatch" in conflict_types
     assert "stopped_mismatch" in conflict_types
+    assert severities["dose_mismatch"] == "high"
+    assert severities["stopped_mismatch"] == "high"
 
 
 def test_detects_blacklisted_class_combination():
@@ -72,7 +75,9 @@ def test_detects_blacklisted_class_combination():
         blacklisted_class_combinations=[["ace inhibitor", "arb"]],
     )
 
-    assert any(c.conflict_type.value == "class_combination" for c in conflicts)
+    class_conflicts = [c for c in conflicts if c.conflict_type.value == "class_combination"]
+    assert class_conflicts
+    assert class_conflicts[0].severity.value == "critical"
 
 
 def test_detects_frequency_mismatch():

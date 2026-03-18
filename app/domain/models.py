@@ -27,6 +27,13 @@ class ConflictType(str, Enum):
     STOPPED_MISMATCH = "stopped_mismatch"
 
 
+class ConflictSeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class IncomingMedication(BaseModel):
     name: str = Field(min_length=1)
     dose_value: float | None = Field(default=None, gt=0)
@@ -98,6 +105,7 @@ class CanonicalMedication(BaseModel):
 
 class ConflictCandidate(BaseModel):
     conflict_type: ConflictType
+    severity: ConflictSeverity
     involved_drugs: list[str]
     involved_sources: list[SourceType]
     summary: str
@@ -108,6 +116,14 @@ class ResolveConflictRequest(BaseModel):
     resolution_reason: str = Field(min_length=3)
     chosen_source: SourceType | None = None
     resolver: str | None = None
+
+    @field_validator("resolver", mode="before")
+    @classmethod
+    def normalize_resolver(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class ConflictRecordResponse(BaseModel):

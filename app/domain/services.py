@@ -21,11 +21,19 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _conflict_key(conflict_type: str, involved_drugs: list[str], involved_sources: list[str]) -> str:
+def _conflict_key(
+    conflict_type: str,
+    severity: str,
+    involved_drugs: list[str],
+    involved_sources: list[str],
+    details: dict[str, Any],
+) -> str:
     content = {
         "type": conflict_type,
+        "severity": severity,
         "drugs": sorted(involved_drugs),
         "sources": sorted(involved_sources),
+        "details": details,
     }
     return _stable_hash(content)
 
@@ -58,26 +66,15 @@ class MedicationService:
         payload_hash = _stable_hash(stable_payload)
 
         source = request.source.value
-        latest = self.repository.get_latest_snapshot(request.patient_id, source)
-        created_new_version = True
-
-        if latest and latest.get("payload_hash") == payload_hash:
-            snapshot = latest
-            created_new_version = False
-        else:
-            version = 1 if not latest else latest["version"] + 1
-            snapshot = self.repository.create_snapshot(
-                {
-                    "patient_id": request.patient_id,
-                    "clinic_id": patient["clinic_id"],
-                    "source": source,
-                    "version": version,
-                    "captured_at": request.captured_at.astimezone(timezone.utc),
-                    "source_reference": request.source_reference,
-                    "payload_hash": payload_hash,
-                    "medications": stable_payload,
-                }
-            )
+        snapshot, created_new_version = self.repository.create_snapshot_if_new_payload(
+            patient_id=request.patient_id,
+            source=source,
+            clinic_id=patient["clinic_id"],
+            captured_at=request.captured_at.astimezone(timezone.utc),
+            source_reference=request.source_reference,
+            payload_hash=payload_hash,
+            medications=stable_payload,
+        )
 
         latest_snapshots = self.repository.get_latest_snapshots_for_patient(request.patient_id)
         source_medications = {}
@@ -99,8 +96,10 @@ class MedicationService:
             involved_sources = [src.value for src in conflict.involved_sources]
             conflict_key = _conflict_key(
                 conflict.conflict_type.value,
+                conflict.severity.value,
                 conflict.involved_drugs,
                 involved_sources,
+                conflict.details,
             )
             active_keys.add(conflict_key)
             saved = self.repository.upsert_conflict(
@@ -108,6 +107,7 @@ class MedicationService:
                     "patient_id": request.patient_id,
                     "clinic_id": patient["clinic_id"],
                     "conflict_type": conflict.conflict_type.value,
+                    "severity": conflict.severity.value,
                     "involved_drugs": sorted(conflict.involved_drugs),
                     "involved_sources": sorted(involved_sources),
                     "summary": conflict.summary,

@@ -13,6 +13,18 @@ def resolve_conflict(
     request: ResolveConflictRequest,
     service: MedicationService = Depends(get_medication_service),
 ):
+    if request.resolution_reason == "manual_override" and not request.resolver:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "resolver_required",
+                    "message": "resolver is required for manual_override",
+                    "details": None,
+                }
+            },
+        )
+
     updated = service.resolve_conflict(conflict_id, request)
     if not updated:
         raise HTTPException(
@@ -28,6 +40,7 @@ def resolve_conflict(
     return {
         "conflict_id": updated["_id"],
         "resolved": updated["resolved"],
+        "severity": updated.get("severity"),
         "resolution_reason": updated.get("resolution_reason"),
         "chosen_source": updated.get("chosen_source"),
         "resolved_at": updated.get("resolved_at"),

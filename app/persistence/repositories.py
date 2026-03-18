@@ -9,6 +9,7 @@ from uuid import uuid4
 from pymongo import ASCENDING, DESCENDING
 from pymongo.collection import ReturnDocument
 from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
 
 def utc_now() -> datetime:
@@ -25,6 +26,7 @@ class MongoRepository:
     def ensure_indexes(self) -> None:
         self.patients.create_index([("clinic_id", ASCENDING)])
         self.snapshots.create_index([("patient_id", ASCENDING), ("source", ASCENDING), ("version", DESCENDING)])
+        self.snapshots.create_index([("patient_id", ASCENDING), ("source", ASCENDING), ("version", ASCENDING)], unique=True)
         self.snapshots.create_index([("patient_id", ASCENDING), ("captured_at", DESCENDING)])
         self.conflicts.create_index([("clinic_id", ASCENDING), ("resolved", ASCENDING), ("last_seen_at", DESCENDING)])
         self.conflicts.create_index([("patient_id", ASCENDING), ("conflict_key", ASCENDING)], unique=True)
@@ -62,6 +64,44 @@ class MongoRepository:
         self.snapshots.insert_one(doc)
         return doc
 
+    def create_snapshot_if_new_payload(
+        self,
+        *,
+        patient_id: str,
+        source: str,
+        clinic_id: str,
+        captured_at: datetime,
+        source_reference: str | None,
+        payload_hash: str,
+        medications: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], bool]:
+        latest = self.get_latest_snapshot(patient_id, source)
+        if latest and latest.get("payload_hash") == payload_hash:
+            return latest, False
+
+        while True:
+            latest = self.get_latest_snapshot(patient_id, source)
+            if latest and latest.get("payload_hash") == payload_hash:
+                return latest, False
+
+            version = 1 if not latest else latest["version"] + 1
+            try:
+                snapshot = self.create_snapshot(
+                    {
+                        "patient_id": patient_id,
+                        "clinic_id": clinic_id,
+                        "source": source,
+                        "version": version,
+                        "captured_at": captured_at,
+                        "source_reference": source_reference,
+                        "payload_hash": payload_hash,
+                        "medications": medications,
+                    }
+                )
+                return snapshot, True
+            except DuplicateKeyError:
+                continue
+
     def upsert_conflict(self, conflict_doc: dict[str, Any]) -> dict[str, Any]:
         existing = self.conflicts.find_one(
             {
@@ -73,6 +113,7 @@ class MongoRepository:
             update_data = {
                 "summary": conflict_doc["summary"],
                 "details": conflict_doc["details"],
+                "severity": conflict_doc.get("severity"),
                 "involved_drugs": conflict_doc["involved_drugs"],
                 "involved_sources": conflict_doc["involved_sources"],
                 "resolved": False,
@@ -170,6 +211,7 @@ class MongoRepository:
                             "in": {
                                 "id": "$$c._id",
                                 "type": "$$c.conflict_type",
+                                "severity": "$$c.severity",
                                 "summary": "$$c.summary",
                                 "involved_drugs": "$$c.involved_drugs",
                                 "last_seen_at": "$$c.last_seen_at",
@@ -259,6 +301,36 @@ class InMemoryRepository:
         self.snapshots.append(deepcopy(doc))
         return deepcopy(doc)
 
+    def create_snapshot_if_new_payload(
+        self,
+        *,
+        patient_id: str,
+        source: str,
+        clinic_id: str,
+        captured_at: datetime,
+        source_reference: str | None,
+        payload_hash: str,
+        medications: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], bool]:
+        latest = self.get_latest_snapshot(patient_id, source)
+        if latest and latest.get("payload_hash") == payload_hash:
+            return latest, False
+
+        version = 1 if not latest else latest["version"] + 1
+        snapshot = self.create_snapshot(
+            {
+                "patient_id": patient_id,
+                "clinic_id": clinic_id,
+                "source": source,
+                "version": version,
+                "captured_at": captured_at,
+                "source_reference": source_reference,
+                "payload_hash": payload_hash,
+                "medications": medications,
+            }
+        )
+        return snapshot, True
+
     def upsert_conflict(self, conflict_doc: dict[str, Any]) -> dict[str, Any]:
         lookup = (conflict_doc["patient_id"], conflict_doc["conflict_key"])
         existing = next(
@@ -271,6 +343,7 @@ class InMemoryRepository:
                 {
                     "summary": conflict_doc["summary"],
                     "details": conflict_doc["details"],
+                    "severity": conflict_doc.get("severity"),
                     "involved_drugs": conflict_doc["involved_drugs"],
                     "involved_sources": conflict_doc["involved_sources"],
                     "resolved": False,
@@ -354,6 +427,7 @@ class InMemoryRepository:
                         {
                             "id": c["_id"],
                             "type": c["conflict_type"],
+                            "severity": c.get("severity"),
                             "summary": c["summary"],
                             "involved_drugs": c["involved_drugs"],
                             "last_seen_at": c["last_seen_at"],
