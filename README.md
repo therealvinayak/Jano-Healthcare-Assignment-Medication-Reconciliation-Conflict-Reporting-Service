@@ -55,8 +55,13 @@ pytest
 5. Run API server.
 
 ### Commands
-- Detect five conflict types with severity levels (low/medium/high/critical): duplicate entry, dose mismatch, frequency mismatch, blacklisted class combination, active vs stopped mismatch
+```bash
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload
+```
 
 API root: http://127.0.0.1:8000
 OpenAPI docs: http://127.0.0.1:8000/docs
@@ -78,10 +83,14 @@ If local MongoDB is not available, the smoke script runs the same API endpoints 
 ## Postman Collection (Smoke Flow)
 - Import: docs/postman/Medication-Reconciliation-Smoke.postman_collection.json
 - Set collection variable baseUrl if needed (default: http://127.0.0.1:8000)
-	- healthcheck -> create patient -> ingest clinic -> ingest hospital -> unresolved report -> resolve conflict -> 30-day summary
+- Run requests top-to-bottom:
+  - healthcheck -> create patient -> ingest clinic -> ingest hospital -> unresolved report -> resolve conflict -> 30-day summary
 
+## Test
+```bash
 pytest
 ```
+
 ## Architecture Overview
 The system is structured into four layers.
 1. API layer
@@ -127,6 +136,10 @@ Architecture diagram (Mermaid): docs/architecture.md
 
 5. Versioning policy
 - Immutable source snapshots with payload-hash deduplication.
+- Bounded retry and unique patient+source+version index reduce version contention risk.
+
+6. Conflict lifecycle policy
+- Conflict state is persisted and conflict events (detected/resolved/reopened) are logged for auditability.
 
 ## API Endpoints
 - POST /api/v1/patients
@@ -149,11 +162,10 @@ Architecture diagram (Mermaid): docs/architecture.md
 ## Known Limitations and Next Steps
 1. Uses static rule file, not a clinical drug ontology.
 2. No authentication/authorization.
-3. Conflict severity scoring is not implemented.
-4. Frequency normalization is lexical and does not yet map semantically equivalent strings (for example, qd vs once daily).
-5. Duplicate detection is currently source-scoped and may require clinician workflow tuning in production.
-6. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
-7. Next steps:
+3. Frequency normalization is still lexical and does not cover all clinical shorthand variants.
+4. Duplicate detection is currently source-scoped and may require clinician workflow tuning in production.
+5. Screenshot capture automation is not included in this repository; capture screenshots from Swagger UI or API client during your final demo run.
+6. Next steps:
 - Add user identity and audit trail per action.
 - Add richer normalization (brand/generic mapping).
 - Add pagination and cursor-based reporting APIs.
