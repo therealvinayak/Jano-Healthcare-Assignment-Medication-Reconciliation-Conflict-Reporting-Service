@@ -66,15 +66,20 @@ class MedicationService:
         payload_hash = _stable_hash(stable_payload)
 
         source = request.source.value
-        snapshot, created_new_version = self.repository.create_snapshot_if_new_payload(
-            patient_id=request.patient_id,
-            source=source,
-            clinic_id=patient["clinic_id"],
-            captured_at=request.captured_at.astimezone(timezone.utc),
-            source_reference=request.source_reference,
-            payload_hash=payload_hash,
-            medications=stable_payload,
-        )
+        try:
+            snapshot, created_new_version = self.repository.create_snapshot_if_new_payload(
+                patient_id=request.patient_id,
+                source=source,
+                clinic_id=patient["clinic_id"],
+                captured_at=request.captured_at.astimezone(timezone.utc),
+                source_reference=request.source_reference,
+                payload_hash=payload_hash,
+                medications=stable_payload,
+            )
+        except RuntimeError as exc:
+            if str(exc) == "snapshot_version_contention":
+                raise ValueError("snapshot_version_contention") from exc
+            raise
 
         latest_snapshots = self.repository.get_latest_snapshots_for_patient(request.patient_id)
         source_medications = {}

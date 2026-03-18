@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import random
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -16,12 +18,21 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+MAX_SNAPSHOT_RETRIES = 6
+BASE_SNAPSHOT_RETRY_SECONDS = 0.002
+
+
 class MongoRepository:
     def __init__(self, db: Database):
         self.db = db
         self.patients = db["patients"]
         self.snapshots = db["medication_snapshots"]
         self.conflicts = db["medication_conflicts"]
+        self.conflict_events = db["medication_conflict_events"]
+        self.contention_metrics = {
+            "snapshot_retry_count": 0,
+            "snapshot_contention_failures": 0,
+        }
 
     def ensure_indexes(self) -> None:
         self.patients.create_index([("clinic_id", ASCENDING)])
@@ -30,6 +41,39 @@ class MongoRepository:
         self.snapshots.create_index([("patient_id", ASCENDING), ("captured_at", DESCENDING)])
         self.conflicts.create_index([("clinic_id", ASCENDING), ("resolved", ASCENDING), ("last_seen_at", DESCENDING)])
         self.conflicts.create_index([("patient_id", ASCENDING), ("conflict_key", ASCENDING)], unique=True)
+        self.conflict_events.create_index([("patient_id", ASCENDING), ("occurred_at", DESCENDING)])
+        self.conflict_events.create_index([("conflict_id", ASCENDING), ("occurred_at", DESCENDING)])
+
+    def record_conflict_event(
+        self,
+        *,
+        conflict_id: str,
+        patient_id: str,
+        clinic_id: str,
+        conflict_key: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        event_doc = {
+            "_id": str(uuid4()),
+            "conflict_id": conflict_id,
+            "patient_id": patient_id,
+            "clinic_id": clinic_id,
+            "conflict_key": conflict_key,
+            "event_type": event_type,
+            "payload": payload or {},
+            "occurred_at": utc_now(),
+        }
+        self.conflict_events.insert_one(event_doc)
+        return event_doc
+
+    def get_conflict_events(self, patient_id: str) -> list[dict[str, Any]]:
+        return list(
+            self.conflict_events.find({"patient_id": patient_id}).sort([("occurred_at", DESCENDING)])
+        )
+
+    def get_contention_metrics(self) -> dict[str, int]:
+        return dict(self.contention_metrics)
 
     def create_patient(self, payload: dict[str, Any]) -> dict[str, Any]:
         doc = {"_id": str(uuid4()), "created_at": utc_now(), **payload}
@@ -79,7 +123,7 @@ class MongoRepository:
         if latest and latest.get("payload_hash") == payload_hash:
             return latest, False
 
-        while True:
+        for attempt in range(MAX_SNAPSHOT_RETRIES):
             latest = self.get_latest_snapshot(patient_id, source)
             if latest and latest.get("payload_hash") == payload_hash:
                 return latest, False
@@ -100,49 +144,86 @@ class MongoRepository:
                 )
                 return snapshot, True
             except DuplicateKeyError:
-                continue
+                self.contention_metrics["snapshot_retry_count"] += 1
+                sleep_seconds = BASE_SNAPSHOT_RETRY_SECONDS * (2 ** attempt) + random.uniform(0, 0.001)
+                time.sleep(sleep_seconds)
+
+        self.contention_metrics["snapshot_contention_failures"] += 1
+        raise RuntimeError("snapshot_version_contention")
 
     def upsert_conflict(self, conflict_doc: dict[str, Any]) -> dict[str, Any]:
-        existing = self.conflicts.find_one(
-            {
-                "patient_id": conflict_doc["patient_id"],
-                "conflict_key": conflict_doc["conflict_key"],
-            }
-        )
-        if existing:
-            update_data = {
-                "summary": conflict_doc["summary"],
-                "details": conflict_doc["details"],
-                "severity": conflict_doc.get("severity"),
-                "involved_drugs": conflict_doc["involved_drugs"],
-                "involved_sources": conflict_doc["involved_sources"],
-                "resolved": False,
-                "resolution_reason": None,
-                "chosen_source": None,
-                "resolved_at": None,
-                "last_seen_at": utc_now(),
-            }
-            self.conflicts.update_one({"_id": existing["_id"]}, {"$set": update_data})
-            existing.update(update_data)
-            return existing
-
-        doc = {
-            "_id": str(uuid4()),
-            "created_at": utc_now(),
-            "last_seen_at": utc_now(),
-            "resolved": False,
-            "resolution_reason": None,
-            "chosen_source": None,
-            "resolved_at": None,
-            **conflict_doc,
+        lookup = {
+            "patient_id": conflict_doc["patient_id"],
+            "conflict_key": conflict_doc["conflict_key"],
         }
-        self.conflicts.insert_one(doc)
+        existing = self.conflicts.find_one(lookup)
+        now = utc_now()
+        doc = self.conflicts.find_one_and_update(
+            lookup,
+            {
+                "$set": {
+                    "summary": conflict_doc["summary"],
+                    "details": conflict_doc["details"],
+                    "severity": conflict_doc.get("severity"),
+                    "involved_drugs": conflict_doc["involved_drugs"],
+                    "involved_sources": conflict_doc["involved_sources"],
+                    "resolved": False,
+                    "resolution_reason": None,
+                    "chosen_source": None,
+                    "resolved_at": None,
+                    "last_seen_at": now,
+                    "conflict_type": conflict_doc["conflict_type"],
+                    "clinic_id": conflict_doc["clinic_id"],
+                },
+                "$setOnInsert": {
+                    "_id": str(uuid4()),
+                    "created_at": now,
+                    "conflict_key": conflict_doc["conflict_key"],
+                    "patient_id": conflict_doc["patient_id"],
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+
+        if existing is None:
+            event_type = "detected_new"
+        elif existing.get("resolved"):
+            event_type = "detected_reopened"
+        else:
+            event_type = "detected_seen"
+
+        self.record_conflict_event(
+            conflict_id=doc["_id"],
+            patient_id=doc["patient_id"],
+            clinic_id=doc["clinic_id"],
+            conflict_key=doc["conflict_key"],
+            event_type=event_type,
+            payload={
+                "conflict_type": doc["conflict_type"],
+                "severity": doc.get("severity"),
+            },
+        )
         return doc
 
     def auto_resolve_conflicts_not_in_keys(self, patient_id: str, active_keys: set[str]) -> None:
         query = {"patient_id": patient_id, "resolved": False}
         if active_keys:
             query["conflict_key"] = {"$nin": list(active_keys)}
+        candidates = list(
+            self.conflicts.find(
+                query,
+                {
+                    "_id": 1,
+                    "patient_id": 1,
+                    "clinic_id": 1,
+                    "conflict_key": 1,
+                },
+            )
+        )
+        if not candidates:
+            return
+
         updates = {
             "$set": {
                 "resolved": True,
@@ -152,7 +233,18 @@ class MongoRepository:
                 "last_seen_at": utc_now(),
             }
         }
-        self.conflicts.update_many(query, updates)
+        ids = [row["_id"] for row in candidates]
+        self.conflicts.update_many({"_id": {"$in": ids}}, updates)
+
+        for row in candidates:
+            self.record_conflict_event(
+                conflict_id=row["_id"],
+                patient_id=row["patient_id"],
+                clinic_id=row["clinic_id"],
+                conflict_key=row["conflict_key"],
+                event_type="resolved_auto",
+                payload={"reason": "auto_resolved_no_longer_detected"},
+            )
 
     def resolve_conflict(
         self,
@@ -174,6 +266,19 @@ class MongoRepository:
             {"$set": updates},
             return_document=ReturnDocument.AFTER,
         )
+        if result:
+            self.record_conflict_event(
+                conflict_id=result["_id"],
+                patient_id=result["patient_id"],
+                clinic_id=result["clinic_id"],
+                conflict_key=result["conflict_key"],
+                event_type="resolved_manual",
+                payload={
+                    "resolution_reason": resolution_reason,
+                    "chosen_source": chosen_source,
+                    "resolver": resolver,
+                },
+            )
         return result
 
     def get_unresolved_patients_by_clinic(self, clinic_id: str) -> list[dict[str, Any]]:
@@ -264,9 +369,45 @@ class InMemoryRepository:
         self.patients: dict[str, dict[str, Any]] = {}
         self.snapshots: list[dict[str, Any]] = []
         self.conflicts: dict[str, dict[str, Any]] = {}
+        self.conflict_events: list[dict[str, Any]] = []
+        self.contention_metrics = {
+            "snapshot_retry_count": 0,
+            "snapshot_contention_failures": 0,
+        }
 
     def ensure_indexes(self) -> None:
         return None
+
+    def record_conflict_event(
+        self,
+        *,
+        conflict_id: str,
+        patient_id: str,
+        clinic_id: str,
+        conflict_key: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        event_doc = {
+            "_id": str(uuid4()),
+            "conflict_id": conflict_id,
+            "patient_id": patient_id,
+            "clinic_id": clinic_id,
+            "conflict_key": conflict_key,
+            "event_type": event_type,
+            "payload": payload or {},
+            "occurred_at": utc_now(),
+        }
+        self.conflict_events.append(deepcopy(event_doc))
+        return deepcopy(event_doc)
+
+    def get_conflict_events(self, patient_id: str) -> list[dict[str, Any]]:
+        events = [e for e in self.conflict_events if e["patient_id"] == patient_id]
+        events.sort(key=lambda x: x["occurred_at"], reverse=True)
+        return deepcopy(events)
+
+    def get_contention_metrics(self) -> dict[str, int]:
+        return dict(self.contention_metrics)
 
     def create_patient(self, payload: dict[str, Any]) -> dict[str, Any]:
         doc = {"_id": str(uuid4()), "created_at": utc_now(), **payload}
@@ -339,6 +480,7 @@ class InMemoryRepository:
         )
         now = utc_now()
         if existing:
+            was_resolved = existing.get("resolved", False)
             existing.update(
                 {
                     "summary": conflict_doc["summary"],
@@ -353,6 +495,17 @@ class InMemoryRepository:
                     "last_seen_at": now,
                 }
             )
+            self.record_conflict_event(
+                conflict_id=existing["_id"],
+                patient_id=existing["patient_id"],
+                clinic_id=existing["clinic_id"],
+                conflict_key=existing["conflict_key"],
+                event_type="detected_reopened" if was_resolved else "detected_seen",
+                payload={
+                    "conflict_type": existing["conflict_type"],
+                    "severity": existing.get("severity"),
+                },
+            )
             return deepcopy(existing)
 
         doc = {
@@ -366,6 +519,17 @@ class InMemoryRepository:
             **conflict_doc,
         }
         self.conflicts[doc["_id"]] = doc
+        self.record_conflict_event(
+            conflict_id=doc["_id"],
+            patient_id=doc["patient_id"],
+            clinic_id=doc["clinic_id"],
+            conflict_key=doc["conflict_key"],
+            event_type="detected_new",
+            payload={
+                "conflict_type": doc["conflict_type"],
+                "severity": doc.get("severity"),
+            },
+        )
         return deepcopy(doc)
 
     def auto_resolve_conflicts_not_in_keys(self, patient_id: str, active_keys: set[str]) -> None:
@@ -382,6 +546,14 @@ class InMemoryRepository:
                     "resolved_at": utc_now(),
                     "last_seen_at": utc_now(),
                 }
+            )
+            self.record_conflict_event(
+                conflict_id=conflict["_id"],
+                patient_id=conflict["patient_id"],
+                clinic_id=conflict["clinic_id"],
+                conflict_key=conflict["conflict_key"],
+                event_type="resolved_auto",
+                payload={"reason": "auto_resolved_no_longer_detected"},
             )
 
     def resolve_conflict(
@@ -403,6 +575,18 @@ class InMemoryRepository:
                 "resolved_by": resolver,
                 "last_seen_at": utc_now(),
             }
+        )
+        self.record_conflict_event(
+            conflict_id=conflict["_id"],
+            patient_id=conflict["patient_id"],
+            clinic_id=conflict["clinic_id"],
+            conflict_key=conflict["conflict_key"],
+            event_type="resolved_manual",
+            payload={
+                "resolution_reason": resolution_reason,
+                "chosen_source": chosen_source,
+                "resolver": resolver,
+            },
         )
         return deepcopy(conflict)
 

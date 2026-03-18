@@ -26,6 +26,17 @@ def ingest_medications(
                     }
                 },
             ) from exc
+        if str(exc) == "snapshot_version_contention":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": {
+                        "code": "snapshot_version_contention",
+                        "message": "Concurrent snapshot writes could not be reconciled",
+                        "details": None,
+                    }
+                },
+            ) from exc
         raise HTTPException(
             status_code=400,
             detail={
