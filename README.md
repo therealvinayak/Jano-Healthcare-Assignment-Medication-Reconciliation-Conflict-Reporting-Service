@@ -132,19 +132,6 @@ This service is a FastAPI + MongoDB medication reconciliation backend designed f
 	- 30-day clinic summary for patients above a conflict threshold
 - Architecture is separated across API routes, domain logic, and persistence, with tests for ingestion, conflict logic, validation, and reporting.
 
-## 60-Second Interview Demo Script
-"I will walk through the core flow quickly.
-
-First, I create a patient. Then I ingest medications from clinic_emr and hospital_discharge. During ingestion, medications are normalized into a canonical representation so equivalent forms compare reliably.
-
-Next, the conflict engine evaluates latest source snapshots and persists auditable conflict records with severity, evidence, and lifecycle metadata.
-
-Versioning is source-scoped and immutable. If I re-ingest an identical payload with identical provenance fields, the version is deduplicated; if provenance differs, a new version is created to preserve timeline fidelity.
-
-From there, I can call unresolved conflicts by clinic for triage and the 30-day summary endpoint for operational reporting.
-
-Finally, I resolve a conflict with a resolution reason and chosen source. The system stores resolution metadata and maintains conflict event history for traceability."
-
 ## Clinical Assumptions and Trade-offs
 1. Dose conflict rule
 - Same normalized drug name with differing dose signatures across active sources is flagged.
