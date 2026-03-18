@@ -2,6 +2,48 @@
 
 FastAPI + MongoDB MVP for ingesting multi-source medication lists, detecting unresolved conflicts, and reporting conflicts at clinic level.
 
+## Submission Snapshot
+### Quick Start
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload
+```
+
+### Test Command
+```bash
+pytest
+```
+
+### What Is Implemented
+- Ingest medication lists by source (clinic_emr, hospital_discharge, patient_reported)
+- Normalize medication payloads to a canonical internal representation
+- Detect three conflict types: dose mismatch, blacklisted class combination, active vs stopped mismatch
+- Persist auditable conflict records with resolved/unresolved state and resolution metadata
+- Provide reporting endpoints:
+	- unresolved conflicts by clinic
+	- 30-day clinic summary with minimum conflict threshold
+- Provide source-specific longitudinal snapshot history with versioning
+
+### Deliverables (Quick Links)
+- Schema and indexing rationale: [docs/schema.md](docs/schema.md)
+- Architecture diagram: [docs/architecture.md](docs/architecture.md)
+- Seed script: [scripts/seed_data.py](scripts/seed_data.py)
+- Smoke evidence: [docs/smoke_evidence.md](docs/smoke_evidence.md)
+- Postman collection: [docs/postman/Medication-Reconciliation-Smoke.postman_collection.json](docs/postman/Medication-Reconciliation-Smoke.postman_collection.json)
+- Tests:
+	- [tests/unit/test_conflict_detection.py](tests/unit/test_conflict_detection.py)
+	- [tests/api/test_reporting_unresolved.py](tests/api/test_reporting_unresolved.py)
+	- [tests/api/test_reporting_30d_edge_case.py](tests/api/test_reporting_30d_edge_case.py)
+	- [tests/api/test_validation_errors.py](tests/api/test_validation_errors.py)
+
+### Important Sections
+- Known limitations: [Known Limitations and Next Steps](#known-limitations-and-next-steps)
+- AI usage disclosure: [AI Usage Disclosure](#ai-usage-disclosure)
+- Release checklist: [Release Checklist (Assignment 2)](#release-checklist-assignment-2)
+
 ## Setup (Under 5 Minutes)
 1. Create and activate virtual environment.
 2. Install dependencies.
