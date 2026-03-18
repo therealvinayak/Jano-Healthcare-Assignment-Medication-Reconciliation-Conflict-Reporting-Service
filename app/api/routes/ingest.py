@@ -16,5 +16,23 @@ def ingest_medications(
         return service.ingest(request)
     except ValueError as exc:
         if str(exc) == "patient_not_found":
-            raise HTTPException(status_code=404, detail="Patient not found") from exc
-        raise HTTPException(status_code=400, detail="Invalid ingestion request") from exc
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": "patient_not_found",
+                        "message": "Patient not found",
+                        "details": None,
+                    }
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "invalid_ingestion_request",
+                    "message": "Invalid ingestion request",
+                    "details": None,
+                }
+            },
+        ) from exc

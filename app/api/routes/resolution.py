@@ -15,7 +15,16 @@ def resolve_conflict(
 ):
     updated = service.resolve_conflict(conflict_id, request)
     if not updated:
-        raise HTTPException(status_code=404, detail="Conflict not found")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "conflict_not_found",
+                    "message": "Conflict not found",
+                    "details": None,
+                }
+            },
+        )
     return {
         "conflict_id": updated["_id"],
         "resolved": updated["resolved"],
