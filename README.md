@@ -8,6 +8,40 @@ FastAPI + MongoDB MVP for ingesting multi-source medication lists, detecting unr
 - ![Swagger UI] <img width="1919" height="1018" alt="image" src="https://github.com/user-attachments/assets/74a87169-0e6d-429d-b1e6-0ab0f8ddd4a3" />
 
 
+## Deployment & API Proof
+
+### Swagger UI (Service Live)
+
+![Swagger UI](screenshots/swaggerui.png)
+
+---
+
+### Medication Ingestion (POST /medications/ingest)
+
+![Medication Ingest](screenshots/medication-ingest.png)
+
+---
+
+### Conflict Detection (Core Feature)
+
+![Conflict Detection](screenshots/conflict-detection.png)
+
+---
+
+### Patient History
+
+![Patient History](screenshots/patient-history.png)
+
+---
+
+### 🧪 Sample Scenario Tested
+
+* Patient created with medications from multiple sources
+* Conflicting medications detected automatically
+* Conflict retrieved via reports API
+* Conflict resolution endpoint verified
+
+
 ## Submission Snapshot
 ### Quick Start
 ```bash
