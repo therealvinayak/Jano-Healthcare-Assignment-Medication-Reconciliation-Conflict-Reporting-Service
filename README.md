@@ -5,6 +5,8 @@ FastAPI + MongoDB MVP for ingesting multi-source medication lists, detecting unr
 ## Live Demo
 - API Docs: https://med-reconciliation.onrender.com/docs
 - Health Check: https://med-reconciliation.onrender.com/health
+- ![Swagger UI] <img width="1919" height="1018" alt="image" src="https://github.com/user-attachments/assets/74a87169-0e6d-429d-b1e6-0ab0f8ddd4a3" />
+
 
 ## Submission Snapshot
 ### Quick Start
